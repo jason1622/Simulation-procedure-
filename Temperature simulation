@@ -1,0 +1,236 @@
+```{r}
+library(ncdf4) # package for netcdf manipulation
+library(fields)
+library(maps)
+library(matrixStats)
+library(MASS)
+library(gstat)
+```
+```{r}
+#STEP ONE 
+#Start with third part of this step first.
+
+xchange <- 168
+latsub <- length(lat_s)
+lonsub <- length(lon_s)
+x_temp_change <- matrix(data=0, nrow = nrow(ta.slice.human),ncol= ((ncol(ta.slice.human))*xchange) )
+for(i in 1:xchange){x_temp_change[,((i-1)*latsub+1):(latsub*i)] <- (ta_human[, ,(i+120)]- ta_human[, ,i])}
+
+x_temp_change <- matrix(data=0, nrow = length(lon_s),ncol= ((length(lat_s))*xchange) )
+for(i in 1:xchange){x_temp_change[,((i-1)*latsub+1):(latsub*i)] <- (ta_human[, ,(i+120)]- ta_human[, ,i])}
+# the column groups of this matrix is the temperature change ranging from January to December, each with a span of ten years. Now we vectorise (so that the variables follow the same convention as in our methodology) we remove the NA values and take the first year of differences to estimate covariance matrix C. 
+#Also, the degrees of latitude must be restricted between 70 degrees south and 80 degrees south.
+human <- matrix(data=0,nrow =lonsub,ncol=latsub)
+for(l in 1:xchange){human <- human+x_temp_change[,((l-1)*latsub+1):(latsub*l)]}
+meanx <- (1/xchange)*human
+```
+
+
+```{r}
+#image.plot(lon,lat,meanx,xlab='Longitude',ylab='Latitude',main ='Global air temperatures due to spawns of satan')
+#map("world",add=T,fill=TRUE,col=NA, bg="gray",wrap=c(0,360))
+```
+
+
+```{r}
+image.plot(lon_s,lat_s,meanx,xlab='Longitude',ylab='Latitude',main ='Air temperature changes due to human forcing')
+map("world",add=T,fill=TRUE,col=NA, bg="gray",wrap=c(0,360))
+```
+
+calX_human <- matrix(data=0,nrow=nrow(x_temp_change)*latsub,ncol=168)
+for( l in 1:168){calX_human[,l] <-matrix(data = c(x_temp_change[,((l-1)*latsub+1):(latsub*l)]),nrow=latsub*nrow(x_temp_change),ncol=1,byrow = TRUE)}
+index <- matrix(data =seq(1,nrow(calX_human),by=1),ncol=1,nrow = nrow(calX_human))
+calX_ant <- cbind(index,calX_human)
+dim(calX_ant)
+test_ant <- na.omit(calX_ant)
+nrow(test_ant)
+
+#import natural forcingss
+```{r}
+nc_nat <- nc_open("C:/Users/Jason/Downloads/GISS E2 R runs/NAT/ta_Amon_GISS-E2-R_historicalNat_r3i1p3_197601-200012.nc")
+# Save the print(nc) dump to a text file
+{
+    sink('ta_Amon_GISS-E2-R_historicalNat_r3i1p3_197601-200012.nc_metadata.txt')
+ print(nc_nat)
+    sink()
+}
+#nc_nat
+lon <- ncvar_get(nc_nat, "lon")
+lat <- ncvar_get(nc_nat, "lat")
+pre <- ncvar_get(nc_nat, "plev")
+t <- ncvar_get(nc_nat, "time") 
+ta_nat <- ncvar_get(nc_nat, "ta") # store the data in a 3-dimensional array
+ 
+lat_s <- lat[lat> -35 & lat< -22]
+lon_s <- lon[ lon> 17 &lon<32]
+ta.slice.nat <- ta_nat[lon>17 & lon<32,lat< -22 &lat>-35 ,4,50] 
+```
+```{r}
+#natural
+xchange <- 168
+ta.nat <- ta_nat[lon>17 & lon<32,lat< -22 &lat>-35 ,4,] 
+x_temp_change <- matrix(data=0, nrow = nrow(ta.slice.nat),ncol= ((ncol(ta.slice.nat))*168) )
+dim(x_temp_change)
+for(i in 1:168){x_temp_change[,((i-1)*latsub+1):(latsub*i)] <- (ta.nat[, ,(i+120)]- ta.nat[,,i])}
+#x_temp_change[130:140,1:15]
+mean.nat <- matrix(data=0,nrow =lonsub,ncol=latsub)
+for(l in 1:xchange){mean.nat <- mean.nat+x_temp_change[,((l-1)*latsub+1):(latsub*l)]}
+meanxnat <- (1/xchange)*mean.nat
+
+calX_nat <- matrix(data=0,nrow=nrow(x_temp_change)*latsub,ncol=168)
+for( l in 1:168){calX_nat[,l] <-matrix(data = c(x_temp_change[,((l-1)*latsub+1):(latsub*l)]),nrow=latsub*nrow(x_temp_change),ncol=1,byrow = TRUE)}
+index <- matrix(data =seq(1,nrow(calX_nat),by=1),ncol=1,nrow = nrow(calX_nat))
+#calX_nat[145:150,1:15]
+
+
+calX_nat <- cbind(index,calX_nat)
+
+#calX_nat <- calX_nat[test_ant[,1],]
+
+final_nat <- na.omit(calX_nat)
+#Now the two vectors probably will not be of the same size. They will have the same gridblocks so we need to match indices from that of the human matrix to the natural forcings.I'm thinking maybe add an index column to both matrices. Then take subset of natural data whose indices to that of the non-zero human matrix.
+#First import the natural forcings data
+final_ant <- test_ant[ which(test_ant[,1]== final_nat[,1]), ]
+
+final_nat <- final_nat[,2:ncol(final_nat)]
+final_ant <- final_ant[,2:ncol(final_ant)]
+#Thus the means are given by
+ant_x <- rowMeans(final_ant)
+nat_x <- rowMeans(final_nat)
+
+mean_x <- cbind(ant_x[1:length(ant_x)],nat_x[1:length(nat_x)]) 
+
+```
+
+```{r}
+nc_true <- nc_open("C:/Users/Jason/Downloads/uat4_tb_v03r03_avrg_chtlt_197812_201705.nc")
+{
+    sink('uat4_tb_v03r03_avrg_chtlt_197812_201705.nc_metadata.txt')
+ print(nc_true)
+    sink()
+}
+#nc_true
+lon <- ncvar_get(nc_true, "longitude")
+lat <- ncvar_get(nc_true, "latitude")
+t <- ncvar_get(nc_true, "time") 
+temp<- ncvar_get(nc_true, "brightness_temperature")
+
+temp.y <- temp[(lon>17 & lon<32), (lat< -20 & lat>-35),]
+lat.y <- lat[lat< -20 & lat > -35]
+latysub <- length(lat.y)
+lon.y <- lon[lon>17 & lon<32]
+lonysub <- length(lon.y)
+# getting temperature differences and storing them all in the matrix y_temp change, same as before.
+length(t)
+change<- 353
+temp.slice <- temp.y[,,20]
+
+y_temp_change1 <- matrix(data=0, nrow = nrow(temp.slice),ncol= ((ncol(temp.slice))*change) )
+for(i in 12:change){y_temp_change1[,((i-1)*latysub+1):(latysub*i)] <- (temp.y[, ,(i+120)]- temp.y[, ,i])}
+#y_temp_change1[1:8,1:15]
+y_temp_change <- y_temp_change1[,67:ncol(y_temp_change1)]
+#y_temp_change[1:15,1:15]
+calY <- matrix(data=0,nrow=nrow(y_temp_change)*latysub,ncol=342)
+
+#matrix(data = c(y_temp_change[,((l-1)*latysub+1):(latysub*l)]),nrow=latysub*nrow(y_temp_change),ncol=1,byrow = TRUE)
+
+for( l in 1:342){calY[,l] <-matrix(data = c(y_temp_change[,((l-1)*latysub+1):(latysub*l)]),nrow=latysub*nrow(y_temp_change),ncol=1,byrow = TRUE)}
+#calY[1:15,ncol(calY)]
+mean.y <- matrix(data=0,nrow = lonysub,ncol=latysub)
+dim(mean.y)
+dim(y_temp_change)
+for(l in 1:(change-67)){mean.y <- mean.y +y_temp_change[,((l-1)*latysub+1):(latysub*l)]}
+meany <- (1/(change-67))*mean.y
+vecY <- calY
+dim(calY)
+# vecY has the same row size as final_nat and final_ant so no need to match rows in the other direction
+# VecY is a matrix whose rows are the observations for each grid block, thus to work out matrix W, the variances of each row must be obtained.
+varY <- rowVars(vecY)
+```
+
+N <- ncol(vecY)
+n <- nrow(vecY)
+all.data <- cbind(final_nat,final_ant)
+C_est <- cov(t(all.data))
+v1 <- rowMeans(vecY)
+v <- matrix(v1,ncol=1)
+W <- diag(x=varY,nrow=length(varY))
+W1 <- solve(W)
+values<- eigen(C_est)$values
+logvalues <- log(values)
+vecs <- eigen(C_est)$vectors
+pcs <- 0
+prop <- 0
+for(i in 1:length(values)){
+  if(prop<=.9){
+    prop <- prop + (values[i])/sum(values)
+    pcs <- pcs + 1
+  }
+}
+
+```
+
+
+```{r}
+#sample spaces:
+mr <- log(sqrt( (sum(diag(C_est))-sum(logvalues[1:pcs]))/n ))
+za <- 3
+B <- matrix(c(1,0,0,0.5),ncol=2,nrow=2)
+mb <- matrix(data=0,ncol=1,nrow=2)
+B1 <- solve(B)
+sim <- 55000
+burn_in <- 5000
+sims  <-array(0, dim=c(sim-burn_in,(3+pcs),pcs))
+burn <- array(0, dim=c((burn_in),(3+pcs),pcs)) 
+B <- matrix(c(1.5,0,0,0.9),ncol=2,nrow=2)
+B1 <- solve(B)
+```
+
+```{r}
+#these will change in the loop
+foreach(r = 1:pcs)%do%{
+  x0 <- matrix(c(0,0,mr,logvalues[1:r]),ncol=1) # initial values
+  rv <- matrix(c(1,1,mr,logvalues[1:r]),ncol=1) # the random vector that change from one iteration to the next.
+  obs <- seq(1,nrow(rv),by=1) # index of random vector rv will be used later in the loop.
+  mr <- log(sqrt( (sum(diag(C_est))-sum(logvalues[1:r]))/n )) # mean of ln(sigma)
+  Q <- matrix(vecs[,1:r],ncol=r) # matrix of eigenvectors corresponding to the number of principal components
+  for(i in 1:sim){
+    for(j in 1:nrow(rv)){ # for each iteration above, the code must move from variable to variable. 
+      #defining the log posterior density as a function of a scalar and a vector:
+        logpdf <- function(x1,xr){ 
+          #x1 represents  the variable that an observation needs to be obtained and xr is a vector of given observations from the previous iteration.
+          if(j==1){xj <- matrix(c(x1,xr),ncol=1)}
+          else if(j==nrow(rv)){xj <- matrix(c(xr,x1),ncol=1)}
+          else if(j!=1 & j!=nrow(rv)){xj <- matrix(c(rv[1:(j-1),],x1,rv[(j+1):nrow(rv),]),ncol=1)}
+          betav <- matrix(xj[1:2,],ncol=1)
+          ln.sigma <- xj[3,1]
+          lambda <- matrix(c(exp(xj[4:nrow(rv),])),ncol=1)
+          V <- diag(x=c(lambda),nrow=nrow(lambda))
+          C <-Q%*%V%*%t(Q) + exp(ln.sigma)*diag(1,nrow=nrow(C_est))
+          C1 <- solve(C)
+          K1 <- N*W1 + C1
+          K <- solve(K1)
+          return(-0.5*(t(mean_x%*%betav)%*%C1%*%mean_x%*%betav -t(N*W1%*%v +                                                              C1%*%mean_x%*%betav)%*%K%*%(N*W1%*%v+C1%*%mean_x%*%betav)+sum((lambda-logvalues[1:r])**2) +t(betav)%*%B1%*%betav+ (ln.sigma-mr)**2) + 0.5*(log(det(K)) -log(det(C))) )}
+        ind <- obs[obs!=j]
+        xt <- matrix(c(na.omit(rv[obs!=j])),ncol=1)
+        #Metropolis hastings algorithm:
+        xo <-c(rv[j,]) #previous value 
+        #new value from uniform proposal
+        #optimisation interval!
+        xn <- runif(1,min=(x0[j,]-za),max =(x0[j,]+za))
+        down<-(x0[j,]-za)
+        up <-(x0[j,]+za)
+        logmax <- optimise(logpdf,c(down,up),maximum=TRUE,xr=xt)$objective
+        a <- exp(logpdf(xn,xt)-logmax)/exp(logpdf(xo,xt)-logmax)
+        c <- abs(logpdf(xo,xt)-logmax)
+        if(is.nan(a)==TRUE){a <- exp(logpdf(xn,xt)+c-logmax)/exp(logpdf(xo,xt)+c-logmax)}
+        u <- runif(1,min=0,max =1)
+        d <- min(a,1)
+        if(d>=u){observed <- xn}
+        else if (d<u){observed <-xo}
+        rv[j,] <- observed
+        p<- i-burn_in 
+        if(p<0){burn[i,j,r]<-observed}
+        if(p>0){sims[p,j,r]<-observed }}
+  }
+}
