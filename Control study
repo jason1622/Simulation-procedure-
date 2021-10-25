@@ -1,0 +1,145 @@
+#control
+Choosing a sample size N = 10
+To set up the data to use to test, the following are needed:
+Chosen predictor observations (matrix x)
+Chose parameter vector (beta vector)
+Covariance of specific errors of the response vector, e1 (so that the data follows the model; y = x*beta + e1)
+Covariance matrix of measurement errors of the response vector.(e)
+so that our generated response observations y(i) will look like:
+y(i) = y + e where i=1,2,..,N.
+To test the method, the sample covariances of the e1 sample is calculated to be covariance estimate of the true temperature changes (covariance C estimated) and the variances of y(i) is calculated to act as the variance of the measurement error covariance W estimate.
+```{r}
+library(mvtnorm)
+library(foreach)
+library(purrr)
+#number of simulations:
+N <- 50
+# input temperatures i.e., x of the model y=xb + e. In this case x a 2 by 1 matrix:
+mean2 <- c(0.1,0.2,0.4,0.5) #col 1
+mean1  <- c(0.3,1,0.7,0.9) #col 2
+mean_x <- matrix(c(mean1,mean2),ncol=2,byrow=TRUE) #matrix x
+
+#Covariance of output temperatures, i.e. the error terms of the model:
+covy <-matrix (c(3.12920645, 3.10983400, 2.8564321, 2.56217325, 3.10983400,3.22572286, 3.0778841, 2.85165949,2.85643206,
+                 3.07788414, 3.1036582, 2.9943373,2.56217325,2.85165949, 2.9943373, 2.99371939),ncol=4,nrow=4,byrow=TRUE)
+#error terms of true temperature changes:
+e1 <- t(rmvnorm(N,sigma = covy))
+#covariance of measurement errors of response temperatures (y):
+We <- diag(c(1.63927,1.672226,1.689006,1.577954),nrow=4)
+#Chosen beta parameters
+beta <- matrix(c(1,4),ncol=1)
+xb <- mean_x%*%beta
+#True values of y
+y <-t(rmvnorm(1,mean=xb,sigma = covy))
+#generating response variables
+yi <- t(rmvnorm(N,y,sigma=We))
+
+```
+
+#Using the data constructed in the above chunk, estimates ar worked out below to mimic the procedure with climate data.
+The covariance of true response vectors 
+Covariance of measurement errors
+Quantities needed for the posterior
+
+#Now, as per the procedure in the research letter, the posterior is constructed for a fixed number of principal components. An upper bound of principal components is chosen so that the cumulative proportion of data explain is around 90%. The method then cycles through all possible values of the number of principal component.
+```{r}
+#dimension of response vector:
+n <- nrow(yi)
+#estimating covariance of specific errors and the corresponding eigenvalues and eigenvectors
+C_est <- cov(t(e1))
+values<- eigen(C_est)$values
+logvalues <- log(values)
+vecs <- eigen(C_est)$vectors
+
+#estimating covariance of measurement errors
+varY <- diag(cov(t(yi)))
+W <- diag(x=varY,nrow=length(varY))
+W1 <- solve(W) # the inverse of W for the posterior distribution
+
+#Working out an upper bound of principal components, stored as pcs:
+pcs <- 0
+prop <- 0
+for(i in 1:length(values)){
+  if(prop<=.9){
+    prop <- prop + (values[i])/sum(values)
+    pcs <- pcs + 1
+  }
+}
+values
+```
+
+# Some quantities needed for the posterior distribution: 
+```{r}
+v1 <- rowMeans(yi)
+v <- matrix(v1,ncol=1)
+mr <- log(sqrt( (sum(diag(C_est))-sum(logvalues[1:pcs]))/n )) # used as an initial value for the mcmc simulation
+mb <- matrix(data=0,ncol=1,nrow=2)
+```
+
+#MCMC Simulation
+The log posterior is used because the values of the posterior are sometimes infinite. Taking the softmax of the density remedies this
+
+
+
+
+sim <- 55000
+burn_in <-5000
+za <-3 #Number of standard deviations away from the mean
+burn <- array(0, dim=c((burn_in),(3+pcs),pcs)) 
+za <-3 #Number of standard deviations away from the mean
+#Storage for the simulations :
+sims  <-array(0, dim=c((sim-burn_in),(3+pcs),pcs))
+#Storage for the simulations :
+sims  <-array(0, dim=c((sim-burn_in),(5+pcs),pcs))
+#cycling through the number of chosen principal components:
+foreach(r = 1:pcs)%do%{
+  x0 <- matrix(c(2,2,mr,1,1,logvalues[1:r]),ncol=1) # initial values
+  rv <- matrix(c(0,0,mr,1,1,logvalues[1:r]),ncol=1) # the random vector that change from one iteration to the next.
+  obs <- seq(1,nrow(rv),by=1) # index of random vector rv will be used later in the loop.
+  mr <- log(sqrt( (sum(diag(C_est))-sum(logvalues[1:r]))/n )) # mean of ln(sigma)
+  Q <- matrix(vecs[,1:r],ncol=r) # matrix of eigenvectors corresponding to the number of principal components
+  for(i in 1:sim){
+    if(rv[4]==0){y1 <- 0.5}
+    if(rv[4]==1){y1 <- 1}
+    if(rv[5]==0){y2 <- 0.6}
+    if(rv[5]==1){y2 <- 2.6}
+    B <- matrix(c(y1,0,0,y2),ncol=2,nrow=2)
+    B1 <- solve(B)
+    for(j in 1:nrow(rv)){ # for each iteration above, the code must move from variable to variable. 
+      #defining the log posterior density as a function of a scalar and a vector:
+        logpdf <- function(x1,xr){ 
+          #x1 represents  the variable that an observation needs to be obtained and xr is a vector of given observations from the previous iteration.
+          if(j==1){xj <- matrix(c(x1,xr),ncol=1)}
+          else if(j==nrow(rv)){xj <- matrix(c(xr,x1),ncol=1)}
+          else if(j!=1 & j!=nrow(rv)){xj <- matrix(c(rv[1:(j-1),],x1,rv[(j+1):nrow(rv),]),ncol=1)}
+          betav <- matrix(xj[1:2,],ncol=1)
+          ln.sigma <- xj[3,1]
+          lambda <- matrix(c(exp(xj[6:nrow(rv),])),ncol=1)
+          V <- diag(x=c(lambda),nrow=nrow(lambda))
+          C <-Q%*%V%*%t(Q) + exp(ln.sigma)*diag(1,nrow=nrow(C_est))
+          C1 <- solve(C)
+          K1 <- N*W1 + C1
+          K <- solve(K1)
+          return(-0.5*(t(mean_x%*%betav)%*%C1%*%mean_x%*%betav -t(N*W1%*%v +                                                              C1%*%mean_x%*%betav)%*%K%*%(N*W1%*%v+C1%*%mean_x%*%betav)+sum((lambda-logvalues[1:r])**2) +t(betav)%*%B1%*%betav+ (ln.sigma-mr)**2) + 0.5*(log(det(K)) -log(det(C))) )}
+        ind <- obs[obs!=j]
+        xt <- matrix(c(na.omit(rv[obs!=j])),ncol=1)
+        #Metropolis hastings algorithm:
+        xo <-c(rv[j,]) #previous value 
+        if(j!=4 & j!=5){xn <- runif(1,min=(x0[j,]-za),max =(x0[j,]+za))}
+        if(j==4|j==5){xn <- rbernoulli(1,p = 1)}
+         #new value from uniform proposal
+        #optimisation interval!
+        if(j!=4&j!=5){down<-(x0[j,]-za)
+        up <-(x0[j,]+za)
+        logmax <- optimise(logpdf,c(down,up),maximum=TRUE,xr=xt)$objective}
+        if(j==4|j==5){logmax <-0}
+        a <- exp(logpdf(xn,xt)-logmax)/exp(logpdf(xo,xt)-logmax)
+        print(a)
+        u <- runif(1,min=0,max =1)
+        if(a>=u){observed <- xn}
+        else if (a<u){observed <-xo}
+        rv[j,] <- observed
+        p<- i-burn_in 
+        if(p>0){sims[p,j,r]<-observed }}
+  }
+}
